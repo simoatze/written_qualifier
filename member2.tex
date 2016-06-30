@@ -1,0 +1,657 @@
+% Thoroughly study the following paper by Koushik Sen on using dynamic testing
+% to establish whether an alarm is a real data race or not: K. Sen, "Race
+% Directed Random Testing of Concurrent Programs," in Proc. ACM SIGPLAN
+% Conference on Programming Language Design and Implementation (PLDI'08),
+% 2008, pp. 11-21.  http://srl.cs.berkeley.edu/~ksen/papers/raced.pdf
+
+% Describe in detail the technique introduced in this paper. Make sure to
+% critically assess its pros and cons. In addition, connect this work to your
+% own research. Could you envision it being used in your own work on OpenMP
+% data race detection? If so, then describe how. If not, then clarify why
+% not. Your response should be roughly 3-4 pages long. Good luck.
+
+\begin{refsection}
+\section{Questions from Zvonimir Rakamari\'c}
+\label{sec:member2}
+
+\textbf{Describe in detail the technique introduced
+  in~\cite{Sen:2008:RDR:1375581.1375584}.
+  %
+  Make sure to critically assess its pros and cons.
+  %
+  In addition, connect this work to your own research.
+  %
+  Could you envision it being used in your own work on OpenMP data race
+  detection?
+  %
+  If so, then describe how.
+  %
+  If not, then clarify why not.}
+
+\vspace{10pt}
+\noindent
+In the paper~\cite{Sen:2008:RDR:1375581.1375584} the author proposes a
+technique to establish whether a reported race in a concurrent program is
+harmful or not.
+%
+This technique is called \emph{race--directed random testing} or \rfuz.
+%
+A harmful race is defined as a race that could lead to errors or exceptions
+in the programs (i.e.\ crash) such as run-time errors or programmer defined
+assertions.
+%
+Finding these bugs caused by data races is hard.
+%
+Existing techniques are either imprecise (e.g.\ static, dynamic and hybrid
+race detectors), and reported bugs require manual inspection to determine
+whether they are real races or just false alarms.
+%
+On the contrary, precise techniques cannot predict potential races that could
+happen in other paths of the program (e.g.\ happens-before based
+detectors~\cite{Flanagan:2009}).
+\\
+
+\noindent
+The \rfuz technique consists of two phases:
+
+\paragraph{Phase 1 - Hybrid-Race Detection:}
+The phase~1 of the algorithm is quite simple, the tool the author implemented
+uses an existing hybrid race detection
+technique~\cite{O'Callahan:2003:HDD:781498.781528}, which combines
+lockset-based detection and happens-before-based detection to identify and
+create a set of potential races in a program.
+%
+Each race in the set is identified as a pair of concurrent statements, called
+\emph{racing pair of statements}, that can potentially race during a
+concurrent execution.
+
+From the paper:
+
+\noindent\rule[0.5ex]{\linewidth}{1pt}
+
+At runtime the race detection algorithm checks, for each pair of events
+$<e_i,e_j>$, the following conditions:
+
+\begin{enumerate}
+\item
+  $e_i = MEM(\sigma_i, m_i, a_i, t_i, L_i) \wedge e_j = MEM(\sigma_j, m_j,
+  a_j, t_j, L_j)$,
+  where $MEM(\sigma, m, a, t, L)$ denotes that a thread $t$ performs an access
+  $a$ (read or write) to a memory location $m$ while holding the set of locks
+  $L$ and executing the statement $\sigma$;
+\item $t_i \neq t_j$, the two events are performed by two different
+  threads;
+\item $m_i = m_j$, the two events access the same memory location;
+\item $a_i = WRITE \vee a_j = WRITE$, at least one of the memory accesses is a
+  write;
+\item \label{itm:lockset} $L_i \cap L_j = \emptyset$, the two events are not holding a common lock;
+\item $\neg(e_i \prec e_j) \wedge \neg(e_j \prec e_i)$, one of the events (and
+  so the memory accesses) does not happens-before the other (i.e.\ they are
+  concurrent).
+\end{enumerate}
+
+If these conditions hold, then $(\sigma_i, \sigma_j)$ is a racing pair of
+statements.
+%
+All the detected racing pairs will form the $RaceSet$ that will be used by the
+phase~2 of the \rfuz.
+
+\noindent\rule[0.5ex]{\linewidth}{1pt}
+
+Phase~1 applies a hybrid race detection
+technique~\cite{O'Callahan:2003:HDD:781498.781528} that combines the lock-set
+detection and the happens-before approaches.
+%
+The hybrid technique essentially merges the lockset detection check
+(condition~\ref{itm:lockset}) and a limited happens-before detection check.
+%
+The happens-before approach reports real races, and they are a subset of the
+races reported by lockset-based detection, as stated by Theorem~1
+in~\cite{O'Callahan:2003:HDD:781498.781528}.
+%
+Some of the details are intentionally omitted in order to focus on the novel
+contribution of \rfuz which is discussed the phase~2.
+
+\paragraph{Phase 2 - \rfuz:}
+The phase~2 is the core of the \rfuz algorithm.
+%
+\rfuz will try to determine if each racing pair in the $RaceSet$ will actually
+race in a real concurrent execution~\footnote{Due to imprecisions of the
+  hybrid-race detection technique it might not actually race.}.
+%
+\rfuz re-executes the program with a random schedule for each pair in the set
+of potential race.
+%
+The random scheduling execution increases the probability for \rfuz to find
+harmful races, as it can enforce a certain order between two statements.
+%
+This is different to normal random testing which may always propose always the
+same order of statements.
+%
+% \rfuz will try to determine if each racing pair of statements
+% $(\sigma_i, \sigma_j) \in RaceSet$ will actually race in a real concurrent
+% execution~\footnote{Due to imprecision of the hybrid-race detection technique
+%   it might not actually race}.
+% %
+% \rfuz re-executes the program with a random schedule for each pair in the set
+% of potential race $<\sigma_1,\sigma_2>$ (with $<\sigma_1,\sigma_2>$ the pair
+% of concurrent statements).
+% %
+% During the execution \rfuz picks a random thread at each program state.
+% %
+% When the thread next-statement $ns_1$ is in $<\sigma_1,\sigma_2>$, postpone
+% its execution.
+% %
+% \rfuz picks another thread and check if next-statement $ns_2$ is in
+% $<\sigma_1,\sigma_2>$ and forms a race with $ns_1$~\footnote{Two statements
+%   race when they are executed by two different threads, both access the same
+%   memory location, and at least one of the statement is a write.}.
+% %
+% If this happens, \rfuz has found a real race formed by $<ns_1,ns_2>$.
+% %
+% When \rfuz reports a race, in order to continue the algorithm, it executes
+% randomly one of the racing statements and keeps to postpone the execution of the
+% other one.
+%
+% The random scheduling execution increases the probability for \rfuz to find
+% harmful races, because it can enforce a certain order between two statements,
+% differently than a normal random testing that may propose always the same
+% order of statements.
+%
+% (for example in Figure~1
+% of~\cite{Sen:2008:RDR:1375581.1375584} a false race would be reported by
+% a hybrid-race detection technique while there is no race since the two
+% instructions order is ensured by data)
+\\
+
+\noindent
+Before going into the details of the \rfuz algorithm, let us consider the
+following definitions:
+
+\begin{itemize}
+\item $Enabled(s)$ indicates the set of threads that are enabled in the
+  program state $s$.
+\item $Alive(s)$ indicates the set of threads that are still running and have
+  not yet reached the state $s$.
+\item $Execute(s,t)$ returns the state reached by executing the next statement
+  of thread $t$ in state $s$.
+\item $NextStmt(s,t)$ indicates the next statement that thread $t$ would
+  execute in state $s$.
+\item $Racing(s,t,postponed)$ returns the thread $t' \in postponed$ such that
+  the statements that $t$ and $t'$ are about to execute (respectively
+  $NextStmt(s,t)$ and $NextStmt(s,t')$) access the same memory location and at
+  least one of the accesses is a write (race).
+\end{itemize}
+
+\noindent
+Therefore, given in input the initial state of the program $s_0$ and the
+$RaceSet$, the \rfuz algorithm (Algorithm~1 in
+\cite{Sen:2008:RDR:1375581.1375584}) for a given racing pair performs the
+following steps:
+
+\begin{itemize}
+\item Initialize the current program state $s$ to $s_0$.
+\item Initialize an empty set to keep the statements where execution will be
+  postponed ($postponed = \emptyset$).
+\item As long as there are $Enabled$ threads in the current state $s$, \rfuz
+  will keep executing the following steps:
+  \begin{enumerate}
+  \item Pick a random thread $t$ from $Enabled(s)$ that are not in the
+    $postponed$ set (this assures to pick a different thread every time).
+  \item Whenever a thread is about to execute one of the racing statements
+    ($NextStmt(s,t) \in RaceSet$) the scheduler \emph{postpones} it
+    ($postponed := postponed \cup {t}$).
+  \item The execution remains postponed, until a different other thread also
+    tries to execute one of the racing statements: if the two statements
+    access the same memory location and one of them is a write, \rfuz has
+    found a race ($Racing(s,t,postponed) \neq \emptyset$).
+  \item Report the real race, and randomly resolve it, which consists of
+    executing one of the statements (and keep postponing the other) to check
+    if something bad can happen.
+    %
+    The execution of one random statement will also generate the next state of
+    the program for the continuation of the algorithm ($s := Execute(s,t)$).
+  \end{enumerate}
+\end{itemize}
+
+\noindent
+Particular cases:
+
+\begin{itemize}
+\item It may happen that all threads are postponed because, even though they
+  are trying to execute a racing statement, none of them actually race as they
+  access different shared memory locations.
+  %
+  The racing pair are the result of an imprecise hybrid race detection
+  technique, which may report pairs that do not result in an actual race.
+  %
+  This situation turns into a deadlock in the \rfuz algorithm, that the
+  scheduler breaks randomly by picking one of the threads from the $postponed$
+  set.
+\item \rfuz algorithm keeps looping until there are not $Enabled$
+  threads. When it reaches this condition, if there are still active threads
+  ($(Active(s) \neq \emptyset$) we have a deadlock in the concurrent program.
+\end{itemize}
+
+\subsection*{\rfuz case study}
+\label{sec:member21}
+
+The example in Figure~1 of~\cite{Sen:2008:RDR:1375581.1375584} is an
+interesting case study which compares \rfuz with a pure
+happens-before-based technique.
+%
+The program shows two threads that access three global variables $x, y, z$,
+and according to a hybrid race detection technique, they race in two cases: on
+variable $x$ and on variable $z$.
+%
+\rfuz will be invoked several times with different random seeds (to generate
+different thread schedulings) on the $RaceSet=\{1, 10\}$ and on the
+$RaceSet=\{5,7\}$.
+
+\paragraph{Case 1:} $RaceSet=\{1, 10\}$. In case $thread1$ first reaches
+statement $1$ it will be postponed.
+%
+Since $y == 0$, $thread2$ will never reach statement $10$ and will terminate,
+therefore no real race will be reported.
+%
+The other schedule is likely to reach statement $10$ first, and as this is not
+possible due to the initialization of the variables, no race will again be
+reported.
+
+\paragraph{Case 2:} $RaceSet=\{5, 7\}$. If $thread1$ reaches statement $5$
+first, it is postponed until $thread2$ reaches statement $7$.
+%
+In this case \rfuz reports a real race since both statements access the same
+memory location and one of them ($7$) is a write.
+%
+The same scenario happens if $thread2$ reaches first statement $7$.
+
+\subparagraph{Discussion on Case1:} At the end of the first paragraph of
+Section~2.2 of the paper, the author specifies that, even though the tool that
+implements \rfuz uses hybrid race detection, any static or dynamic race
+detection technique could be used.
+%
+The author claims that, in the Case~1 of the previous example, hybrid race
+detection technique will always report a race over the variable $x$, however
+this might not be true if the tool would use a pure happens-before relation.
+%
+In the example in Figure~1 of~\cite{Sen:2008:RDR:1375581.1375584} the only
+schedule that would allow a hybrid technique to report the race on $x$ is the
+one reported in Figure~\ref{fig:execution1}, where \emph{Thread~1} is executed
+before \emph{Thread~2}, however this would not be the case for the
+happens-before-based techniques.
+%
+All the other schedules would not allow \emph{Thread~2} to reach variable $x$
+because of $y \neq 1$, so no technique would report a race.
+
+Figure~\ref{fig:omprace1} shows indeed how the happens-before relation, based
+on the schedule in Table~\ref{fig:execution1}, would not report the race on
+$x$.
+%
+(Note that in this case I am not considering $z$ since it does not play an
+important role).
+%
+Let us use DJIT+~\cite{Pozniansky:2007:MEO:1228965.1228969, Flanagan:2009} as
+the algorithm that implements the happens-before in Figure~\ref{fig:omprace1}.
+%
+When $T2$ performs the last read on variable $x$, DJIT+ compares $T2$'s Vector
+Clock (VC) with the write's VC for $x$.
+%
+DJIT+ applies the rule in Algorithm~\ref{alg:djit}.
+%
+$\mathbb{W}_x(t)$ ($<1, 0>$) and $\mathbb{C}_t(t)$ ($<1, 1>$) have the same
+clock for \emph{Thread~1} and the clock for \emph{Thread~2} is smaller in the
+write's vector clock of $x$, this satisfy the previous rule and no race is
+reported.
+%
+In this particular case \rfuz does not perform better than an
+happens-before-based technique, since Phase~1 alone would be able to give an
+exact answer of the races in the program~\footnote{The race in Case~2 would be
+  reported by both hybrid technique or happens-before alone.}.
+\\
+
+\noindent
+Instead, the second example in Figure~2
+of~\cite{Sen:2008:RDR:1375581.1375584}, shows a better scenario where the
+happens-before relation would miss the race on variable $x$ with a default or
+a simple random scheduler.
+%
+\rfuz in this case would allow to explore several schedules and create the
+right scenario to detect and resolve the race condition.
+%
+Indeed, in Phase~1 the hybrid race detection will detect the pair of racing
+statements $(8, 10)$.
+%
+In Phase~2, \rfuz will randomly pick one of the threads: if it picks $thread1$
+the algorithm will first postpone the statement $8$, otherwise if it picks
+$thread2$ the statement $10$ will be postponed.
+%
+In either case, \rfuz will report the race.
+
+\begin{figure}
+  \begin{minipage}[b]{0.28\textwidth}
+    \centering
+    \begin{algorithm}[H]
+      \caption{DJIT+ Read rule}
+      \label{alg:djit}
+      \begin{algorithmic}
+        \If {$\mathbb{R}_x(t) \neq \mathbb{C}_t(t)$}
+
+        \texttt{assert} $\mathbb{W}_x \sqsubseteq \mathbb{C}_t$
+
+        $\mathbb{R}_x(t) := \mathbb{C}_t(t)$
+        \EndIf
+      \end{algorithmic}
+    \end{algorithm}
+    \phantom{1}
+    \phantom{2}
+    \phantom{3}
+    \phantom{4}
+    \begin{tabular}{c c}
+      Thread~1 & Thread~2 \\
+      \hline
+      w(x)   & \\
+      acq(L) & \\
+      w(y)   & \\
+      rel(L) & \\
+               & acq(L) \\
+               & r(y) \\
+               & r(x) \\
+               & rel(L) \\
+      \hline
+    \end{tabular}
+    \caption{Events Trace of example in Figure~1 in~\cite{Sen:2008:RDR:1375581.1375584}}
+    \label{fig:execution1}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[b]{0.7\textwidth}
+    \framebox[1.0\width]{
+      \resizebox{1.0\textwidth}{!}{
+        \xymatrix@C=0.5em@R=1.2em{
+          \mathbf{T1} & & \mathbf{T2} & & \mathbf{L_L} & & \mathbf{R_x} & & \mathbf{W_x} & & \mathbf{R_y} & & \mathbf{W_y} \\
+          <1, 0> \ar[d]^{w(x)} & & <0, 1> & & <0, 0> & & <0, 0> & & <0, 0> & & <0, 0> & & <0, 0> \\
+          <1, 0> \ar[d]^{acq(L)} & & <0, 1> & & <0, 0> \ar@{-->}[lllld] & & <0, 0> & & <1, 0> & & <0, 0> & & <0, 0> \\
+          <1, 0> \ar[d]^{w(y)} & & <0, 1> & & <0, 0> & & <0, 0> & & <1, 0> & & <0, 0> & & <0, 0> \\
+          <1, 0> \ar[d]^{rel(L)} \ar@{-->}[rrrrd] & & <0, 1>  & & <0, 0> & & <0, 0> & & <1, 0> & & <0, 0> & & <1, 0> \\
+          <2, 0> & & <0, 1> \ar[d]^{acq(L)} & & <1, 0> \ar@{-->}[lld] & & <0, 0> & & <1, 0> & & <0, 0> & & <1, 0> \\
+          <2, 0> & & <1, 1> \ar[d]^{r(y)} & & <1, 0> & & <0, 0> & & <1, 0> & & <0, 0> & & <1, 0> \\
+          <2, 0> & & <1, 1> \ar[d]^{r(x)} & & <1, 0> & & <0, 0> & & <1, 0> \ar@{-->}[lllllddd] & & <0, 1> & & <1, 0> \\
+          & & <1, 1> \ar@{-->}[rdd] & & & & & & & & & & \\
+          \\
+          & & & W_x \sqsubseteq C_t \ar[d] & & & & & & & & &\\
+          & & & \textbf{NO RACE} & & & & & & & & & }}
+    }
+    \caption{Race detection applying
+      DJIT+~\cite{Pozniansky:2007:MEO:1228965.1228969} algorithm based on
+      happens-before relation and vector clock, on example in Figure~\ref{fig:execution1}.}
+    \label{fig:omprace1}
+  \end{minipage}
+  \vspace{-10pt}
+\end{figure}
+
+% \subsubsection*{Example 2}
+% The example in Figure~2 of~\cite{Sen:2008:RDR:1375581.1375584} shows
+% another example of two threads that access a global variable $x$.
+% %
+% The access on $x$ by the two threads will clearly results in a data race
+% because of lack of synchronization.
+% %
+% Indeed, a hybrid data race detection technique will predict the race between
+% statement $8$ and $10$.
+% %
+% However, because of the structure of the program, a happens-before-based
+% detection techniques may not be able to report the race with high probability.
+% %
+% Indeed, this probability would depend on the scheduling of the two threads, a
+% simple randomized scheduler would not execute the racing statement temporally
+% next to each other and the happens-before relation would miss this race.
+% %
+% This example
+
+\subsection*{Pros and Cons of \rfuz}
+\label{sec:member22}
+
+\rfuz differs from classical race detection techniques as it is able to
+distinguish whether a race is harmful (or not), by executing potential racing
+statements.
+%
+This is an important feature when used to distinguish real races from false
+alarms reported by hybrid techniques.
+%
+However, the author claims that an advantage of \rfuz is that it separates
+harmful races from benign races.
+%
+In my opinion, the benign races should still be reported as harmful races.
+%
+Whilst \rfuz may identify a race as benign, it is important to keep in mind
+that a ``benign'' race in a debugging environment become harmful in production
+because of compilers optimization, often omitted in the development phase.
+%
+As studied by Boehm~\cite{Boehm:2011:MPB:2001252.2001255}, compilers assume
+race free code and apply transformations that, in presence of a ``benign''
+race, might results in harmful races~\cite{ec2_2015-agralslpm}.
+%
+\rfuz also identifies those races that do not generate any program exception as
+``benign''.
+%
+This is a major downside of the algorithm, since this category includes the
+races that might produce wrong results (i.e.\ bad non-determinism~\footnote{I
+  call it ``bad non-determinism'' to distinguish it from other types of
+  non-determinism such as the one caused by the order in floating-point
+  operations that it is in general expected and sometimes unavoidable.}).
+%
+It is not clear if \rfuz, when it terminates the execution, will include in
+the report all the real races, or only those ones that lead to a program
+exception or error.
+
+A nice feature of \rfuz is that the random scheduler is regulated by a random
+number generator, it means that \rfuz can replay the error scenario, simply
+using the same seed (no events recording needed, lightweight replay
+mechanism).
+%
+Furthermore, \rfuz is highly parallelizable.
+%
+Each execution of the algorithm is independent, since it only focuses on one
+pair of racing statements at a time.
+%
+Therefore, it allows the user to run multiple instances of \rfuz in parallel,
+increasing the performance linearly with the number of available
+processors/cores.
+%
+Similar to all dynamic race detection techniques, \rfuz is not able to detect
+all races in a concurrent program, but only those races that can be produced
+by a given tests.
+%
+It might not be able to distinguish all harmful races from potential races,
+because the random scheduler might not generate the right schedule to
+reproduce the real race.
+
+As shown in the experimental results, \rfuz introduces additional overhead to
+the entire race detection process.
+%
+However, the overhead is negligible as the majority arise from the data race
+detection technique used.
+%
+The results also show that the algorithm is very precise, any races found in
+the benchmarks were confirmed, and the technique guarantees to recreate a data
+race scenario with high probability.
+
+\vspace{-10pt}
+\paragraph{\rfuz on OpenMP programs:}
+The \rfuz can be implemented for any language that supports shared memory and
+threads programming model (i.e.\ C, C++ or Java).
+%
+Considering languages as C and C++, such a tool, would allow to detect races
+not only on PThreads applications, but also on OpenMP programs since they are
+also based on PThreads.
+%
+Existing tools, such as \archer~\cite{Protze:2014:TPL:2688361.2688369},
+already do a good job in finding races on OpenMP applications.
+%
+Indeed, experiments show that \archer does not report any false alarms, and so
+far there have not been any cases where it misses races (with regard to known
+races).
+
+However, \archer is based on a tool called ThreadSanitizer, which rely on the
+happens-before relation.
+%
+As illustrated in the second example of the paper, there are cases where
+happens-before might miss data races making a tool like \archer imprecise.
+%
+The \rfuz approach would mitigate this type of problem, by running the program
+with different possible interleavings that would manifest the latent races.
+%
+With regards to this, it is important to clarify the cases which \rfuz would
+improve the precision of a tool like \archer.
+%
+OpenMP provides several constructs to automatically parallelize C, C++
+programs.
+%
+In general, when a programmer uses construct such as parallel loops, follows a
+very precise structure, that allow to write parallel loop with
+no-synchronization mechanism as shown in Figure~\ref{fig:openmp1}.
+%
+Moreover, branches within parallel loop are very rare.
+%
+In the case of data races in those situations, as illustrated in
+Figure~\ref{fig:openmp2}, it is unusual that the threads scheduling could lead
+a tool like \archer to miss a race.
+%
+Instead, other OpenMP constructs such as tasks, parallel sections, and
+branches within them, may increase the probability to lead an
+happens-before-based tool to miss certain races.
+%
+An example of this situation could be the program in Figure~2 of the paper,
+where the code of $thread1$ and $thread2$ (when translated to OpenMP) is
+respectively executed within two different OpenMP task constructs by two
+threads, as illustrated in Figure~\ref{fig:openmp3}.
+%
+In the OpenMP version, as well as in the PThreads one, a happens-before-based
+detection will not be able to detect the race with high probability, because
+the threads scheduling might not manifest the right order to catch it.
+
+\begin{figure}[t]
+  \begin{minipage}[t]{0.4\textwidth}
+\begin{lstlisting}[language=C]
+  #pragma omp parallel for
+  for (i = 0; i < N; i++)
+     a[i] = a[i] + 1;
+\end{lstlisting}
+    \vspace{-10pt}
+\caption{OpenMP parallel for that does not need any synchronization mechanism
+  to be race free.}
+\label{fig:openmp1}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.4\textwidth}
+\begin{lstlisting}[language=C]
+  #pragma omp parallel for
+  for (i = 1; i < N; i++)
+     a[i] = a[i - 1];
+\end{lstlisting}
+  \vspace{-10pt}
+\caption{OpenMP parallel for with potential data race because of a data
+  dependency in the access of array $a$.}
+\label{fig:openmp2}
+\end{minipage}
+\vspace{-10pt}
+\end{figure}
+
+On the other hand, if it is true that \rfuz would report only those data races
+that lead to an actual error or an exception in the program, this technique
+would not be very useful, since it would miss to report actual races that are
+not classified as harmful.
+%
+My research focuses on data race detection for OpenMP programs, and the main
+goal is to design better techniques to detect any kind of data race, even
+though they are considered non-harmful or ``benign''.
+%
+I specifically apply my data race detection research on HPC scientific
+programs, where previous research~\cite{ec2_2015-agralslpm} has shown that any
+kind of data race could be critical, even if it is classified as ``benign''.
+%
+I believe that the \rfuz approach, after a customization to make it report all
+races any type of actual races, may prove useful to improve the data race
+detection for OpenMP applications.
+
+Another important goal in my research is to reduce the considerable amount of
+overhead generated by race detector tools, as when they are used to check
+large OpenMP applications (as in HPC), the slowdown is even larger than when
+they are applied to regular OpenMP programs.
+%
+% \rfuz has shown very low overhead in the second phase of the algorithm where
+% it tries to reproduce possible racy interleavings.
+%
+% Given that, and the fact \rfuz can use any race detection technique for the
+% first phase, a possible approach that may reduce the overhead of data race
+% detection is to combine \rfuz with a static race detection technique.
+%
+Given that \rfuz can use any race detection technique for the first phase, and
+the fact it has shown very low overhead in the second phase, a possible
+approach that may reduce the overhead of data race detection is to combine
+\rfuz with a static technique.
+%
+Static race detection techniques are known to be very scalable but imprecise,
+i.e.\ they reports many false alarms.
+%
+However, the second phase of \rfuz can be used to verify if the data races
+reported by the static technique are actual races or not.
+%
+Hypothetically, this combination could reduce significantly the overhead of
+the race detection process while maintaining high precision and accuracy.
+
+\begin{figure}[H]
+  \vspace{-10pt}
+  \begin{minipage}[t]{0.35\textwidth}
+    \begin{lstlisting}[language=C, xleftmargin=-30pt, xrightmargin=0pt]
+      |\textbf{main:}|
+      #pragma omp parallel
+      {
+        #pragma omp task shared(x)
+        thread1();
+
+        #pragma omp task shared(x)
+        thread2();
+      }
+    \end{lstlisting}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.3\textwidth}
+    \begin{lstlisting}[language=C, xleftmargin=-15pt, xrightmargin=0pt]
+      |\textbf{thread1:}|
+      #pragma omp critical
+      {
+        f1();
+        |\vdots|
+        f5();
+      }
+      if(x == 0)
+        ERROR;
+    \end{lstlisting}
+  \end{minipage}
+  \hfill
+  \begin{minipage}[t]{0.3\textwidth}
+    \begin{lstlisting}[language=C, xleftmargin=-30pt, xrightmargin=0pt]
+      |\textbf{thread2:}|
+      x = 1;
+      #pragma omp critical
+      {
+        f6();
+      }
+    \end{lstlisting}
+  \end{minipage}
+  \vspace{-10pt}
+  \caption{Example of Figure~2 of the paper implemented with OpenMP tasks.}
+  \label{fig:openmp3}
+  \vspace{-15pt}
+\end{figure}
+
+\printbibliography
+
+\end{refsection}
+
+%%% Local Variables:
+%%% mode: latex
+%%% eval: (flyspell-mode 1)
+%%% TeX-master: "root.tex"
+%%% End:

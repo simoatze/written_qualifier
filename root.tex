@@ -1,0 +1,68 @@
+\documentclass[10pt, oneside]{article}
+\usepackage[letterpaper, margin=1in]{geometry}
+%\usepackage[parfill]{parskip}    		% Activate to begin paragraphs with an empty line rather than an indent
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage[style=numeric,firstinits=true,backend=bibtex]{biblatex}
+\addbibresource{references}
+\usepackage{wrapfig}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{listings}
+\usepackage{url}
+\usepackage{tikz}
+\usetikzlibrary{calc,shapes.multipart,chains,arrows}
+\usepackage{graphicx}
+\usepackage{nameref}
+\usepackage{xspace}
+\usepackage{adjustbox}
+\usepackage{framed}
+\usepackage[all]{xy}
+\usepackage{txfonts,pxfonts}
+\usepackage{bm}
+\usepackage{enumerate}
+\usepackage{algorithm}
+\usepackage{subfigure}
+\usepackage{algpseudocode}
+\usepackage[english,printdayoff]{isodate}
+\usepackage[pdftitle={PhD Written Qualifier Exam - Simone Atzeni}, pdfauthor={Simone
+  Atzeni}, pdfsubject={PhD Written Qualifier}]{hyperref}
+
+\title{\textbf{PhD Written Qualifier Exam}\\{\normalsize Examiners: Ganesh Gopalakrishnan,
+Zvonimir Rakamari\'c, Hari Sundar, Ryan Stutsman}}
+%
+\author{Simone Atzeni\\{\small simone@cs.utah.edu}}
+%
+\date{January 18, 2015 -- January 25, 2015}
+
+\newcommand{\rfuz}{\textsc{RaceFuzzer}\xspace}
+\newcommand{\archer}{\textsc{Archer}\xspace}
+\newcommand{\symp}{\textsc{Symple}\xspace}
+\renewcommand*{\bibfont}{\footnotesize}
+\lstset{basicstyle=\ttfamily,
+escapeinside={||},
+mathescape=true}
+
+\newenvironment{blockquote}{\par\medskip\leftskip=4em\rightskip=2em\noindent\ignorespaces}{\par\medskip}
+
+\begin{document}
+\maketitle
+\newpage
+\setcounter{tocdepth}{1}
+\tableofcontents
+\newpage
+
+\include{member1}
+\include{member2}
+\include{member3}
+\include{member4}
+
+\end{document}
+
+%%% Local Variables:
+%%% mode: latex
+%%% eval: (flyspell-mode 1)
+%%% TeX-master: "root.tex"
+%%% End:

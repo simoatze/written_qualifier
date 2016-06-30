@@ -1,0 +1,386 @@
+% Read the following paper
+
+% Distributed wait state tracking for runtime MPI deadlock detection, Hilbrich
+% et al., SC 13 http://dl.acm.org/citation.cfm?doid=2503210.2503237
+
+% 1. Summarize the paper.
+% 2. What are the main challenges for distributed deadlock detection?
+% 3. Can you suggest an alternative distributed algorithm for deadlock
+% detection or and improvement over the proposed algorithm?
+% 4. What is the overhead of the proposed method? Will this vary depending on
+% the kind of application? Which applications are affected most?
+
+\begin{refsection}
+\section{Questions from Hari Sundar}
+\label{sec:member3}
+
+\subsection*{Summarize the paper.}
+\label{sec:member31}
+
+The authors in~\cite{Hilbrich:2013:DWS:2503210.2503237} propose a novel
+distributed runtime deadlock detection algorithm for MPI that significantly
+increases scalability.
+%
+Indeed, the goal of this work is to provide a scalable deadlock detection that
+allows programmers to detect actual deadlocks at their target scale.
+%
+Existing tools (e.g. MUST~\cite{hilbrich2010must},
+ISP~\cite{DBLP:conf/ptw/VoVG09}, etc.) use centralized approaches based on
+timeout mechanism or interleaving exploring methods.
+%
+Whilst the first ones are scalable and very imprecise (false positives), the
+second ones can be very precise but introduce a very large runtime overhead
+(because of the interleaving (path) explosion problem).
+
+This novel distributed algorithm presented in the paper, uses different
+existing techniques for MPI deadlock detection, to achieve soundness and
+scalability at the same time.
+%
+In particular, they combine \emph{point-to-point} matching, \emph{collective}
+matching, a distributed wait-state analysis and a centralized graph-based
+deadlock detection.
+%
+The main and novel contribution in this approach, is in the implementation of
+a distributed wait-state analysis, that was the scalability bottleneck in
+previous attempts of deadlock detection as in MUST~\cite{hilbrich2013runtime}.
+%
+Despite the centralized graph analysis, the authors show in the experiment
+that, thanks to the distributed algorithm for wait-state analysis, their
+method scales with a large number of processes still maintaining soundness.
+%
+This approach has been integrated in the authors' former tool MUST.
+
+\paragraph{Approach:}
+When an MPI program manifests a deadlock, the tool applies graph-based
+deadlock detection to give the user precise information about the error.
+%
+However, graph-based error detection requires in input information about the
+current MPI state such as active MPI calls of all processes, and current
+point-to-point and collective matching situation.
+%
+In order to obtain this information, the tool intercepts the MPI calls,
+matches them, and then analyzes their blocking semantics in a wait-state
+analysis.
+%
+The wait-state analysis is performed by a transition system that is formally
+defined in~\cite{Hilbrich:2013:DWS:2503210.2503237}.
+%
+Each state of the transition system provides all the inputs required by the
+graph-based deadlock detection.
+%
+The transition system, based on the information of the processed MPI calls,
+determines if a call's wait conditions can be met, if so it considers the next
+operation, otherwise it applies the deadlock detection analysis.
+
+\subparagraph{Transition System:} The transition system defines formally the
+components of the wait-state analysis.
+%
+It specifies the processes $P$, the sequence of MPI \emph{operations} for a
+process in $P$, a logical timestamp for each operation from a specific
+process, a predicate that determines if an MPI call is blocking or not, and a
+state that contains (for each process) the logical timestamp of the currently
+active MPI operations at an execution point of the application.
+%
+In particular, the state is a tuple where each i-th element is the logical
+timestamp of the operation of i-th process in the execution.
+%
+For example the state $(1,2,1)$ means that \emph{process 0} current active
+operation has timestamp $1$, \emph{process 1} current operation has timestamp
+$2$ and so on.
+%
+The transition system also defines the transition rules that allow the system
+to switch from a state to another under certain circumstances.
+%
+The transition relations are the following:
+
+\begin{enumerate}
+\item Non-blocking operations always return after a finite amount of time.
+\item The process may advance to the next operation if the matching operation
+  is also active, \emph{blocking operations}.
+\item A process may advance to the next operation if all processes that belong
+  to the collective process group activate their participating operation,
+  \emph{collective operations}
+\item Handles blocking completion operations (i.e.\
+  \texttt{MPI\_Wait[any,some,all]}.
+\end{enumerate}
+
+The transition system starts from an initial state and repeatedly moves to the
+next state according to the transition relations.
+%
+When no further rule can be applied means that a terminal state has been
+reached, and in particular:
+
+\begin{itemize}
+\item if all processes have reached the \texttt{MPI\_Finalize} operation no
+  deadlock exists
+\item otherwise, there might be a deadlock.
+  %
+  However, as long as some processes are alive, the transition system is not
+  in a terminal state yet.
+  %
+  For example, let us suppose that we have four processes that execute the
+  following MPI calls:
+
+  % \begin{table}[H]
+  %   \centering
+  %   \begin{tabular}{c c c c}
+  %     \textbf{Process 0} & \textbf{Process 1} & \textbf{Process 2} & \textbf{Process 3} \\
+  %     %\hline
+  %     Recv(from:1) & Recv(from:0) & Send(to:4) & Recv(from:3) \\
+  %               & & Recv(from:4) & Send(to:3) \\
+  %               & & Send(to:4) & Recv(from:3) \\
+  %               & & Recv(from:4) & Send(to:3) \\
+  %               & & Send(to:4) & Recv(from:3) \\
+  %               & & Recv(from:4) & Send(to:3)
+  %   \end{tabular}
+  % \end{table}
+
+    \begin{table}[H]
+    \centering
+    \begin{tabular}{l l l l l}
+      \textbf{Process 0:} & Recv(from:1) & & \\
+      \textbf{Process 1:} & Recv(from:0) & & \\
+      \textbf{Process 2:} & Send(to:3) & Recv(from:3) & Send(to:3) & \dots \\
+      \textbf{Process 3:} & Recv(from:2) & Send(to:2) & Recv(from:2) & \dots \\
+    \end{tabular}
+  \end{table}
+
+  The transition system continues to apply transitions, while \emph{Process 0}
+  and \emph{Process 1} are already deadlocked.
+  %
+  In this situation, the deadlocked processes cannot proceed and a timeout for
+  these processes triggers the graph-based analysis.
+  %
+  Notice that if \emph{Process 0} and \emph{Process 1} were stuck for some
+  reason different from a deadlock (i.e.\ long computation), the timeout would
+  be triggered anyway reporting a sort of false alarm that the graph based
+  analysis would confirm.
+\end{itemize}
+
+\begin{figure}
+% \begin{wrapfigure}{l}{0.23\textwidth}
+  \centering
+  \begin{tabular}{c | c | c}
+    Process 0 & Process 1 & Process 2 \\
+    \hline
+    Send(to:1) & Recv(from:ANY) & Send(to:1) \\
+              & Recv(from:ANY) & \\
+    Barrier() & Barrier() & Barrier() \\
+    Send(to:1) & Send(to:2) & Send(to:0) \\
+    Recv(from:2) & Recv(from:0) & Recv(from:1)
+  \end{tabular}
+  \caption{MPI program with send-send deadlock.}
+  \label{fig:mpi_ex1}
+% \end{wrapfigure}
+\end{figure}
+
+\subparagraph{Distribution mechanism of the transition system:} In order to
+make a distributed algorithm that implements the transition system, its states
+need to be distributed across the tool processes, which are additional
+processes (besides the application processes) created to perform the
+wait-state analysis.
+%
+This scheme is realized through a Tree-Based Overlay Network (TBON).
+%
+Running the wait-state analysis on the MPI example in Figure~\ref{fig:mpi_ex1}
+and using three tool processes \emph{T0-T2} the TBON network would look like
+Figure~5 of~\cite{Hilbrich:2013:DWS:2503210.2503237}.
+%
+The wait-state analysis would be distributed across the tool processes $T0$
+and $T1$ -- $T0$ receives information about operations of \emph{Process 0} and
+\emph{Process 1}, while $T1$ receives information of \emph{Process 2}.
+%
+Considering the first send operation of \emph{Process 2} and the receive
+operation of \emph{Process 1}, $T0$ and $T1$ need to communicate in order to
+exchange information to perform the analysis.
+%
+The point-to-point and collective matching interception in this case can
+provide information about the matching of the two operations but not enough
+information about the status of the operations, i.e.\ if they are
+\emph{active} or not.
+%
+Therefore, additional communication is necessary between the tool processes
+within the TBON, to distribute the information.
+%
+In particular, introducing the following five messages allow to exchange this
+data among the processes within the TBON:
+
+\begin{itemize}
+\item \textbf{passSend:} Passes the information that a send operation from a
+  node $T$ (to $T'$) matches with the receive operation hosted in the node $T'$,
+  this message includes the timestamp of the send operation.
+\item \textbf{recvActive:} Inform a node $T$ that hosts a send operation, that
+  the matching receive operation is now active.
+\item \textbf{recvActiveAck:} If $T$ (which host the send operation) received
+  the \textbf{recvActive} message (from $T'$) and its send is as well active,
+  inform $T'$ about the active status.
+\item \textbf{collectiveReady:} If all processes on a node that belong to the
+  process group of a collective operation are active, the nodes sens this
+  message towards the TBON root.
+\item \textbf{collectiveAck:} If the root of the TBON determines that all
+  processes that belong to a collective have activated their participating
+  operation, it broadcast this message towards the first tool processes layer.
+\end{itemize}
+
+Whenever a node receives one of this messages, it issues a handler.
+%
+For example, when a node receives a \textbf{passSend} it issues a
+\emph{handleSensPass} that searches for a receive which consequently matches
+the send that the message describes.
+%
+When the handler finds the matching receive operations it updates that
+operation with the timestamp of the send, otherwise the point-to-point
+matching implementation stores the send operation in its matching structures.
+%
+The matching information stored will be used for later potential matches when
+other MPI operations are intercepted.
+
+As we have seen in the previous example, when one or more process are stuck on
+an MPI operation that can not be matched the timeout expiration will trigger
+the graph-based deadlock detection analysis.
+%
+The graph-based deadlock detection is performed by the root node of the TBON.
+%
+The TBON root initially does not have any information on the state of the
+distributed wait state implementation.
+%
+Therefore, it first requests for a consistent state to the other nodes of the
+TBON.
+%
+A node that received a request from the root node, will describe the wait-for
+conditions of all active operations for which a node cannot apply a
+transition.
+%
+The root wait until it receives the wait-for information for all processes in
+the program
+%
+Once the root node receives all the information, it builds a wait-for graph
+and checks for deadlocks.
+%
+If a deadlock exists logs the information about the deadlock in an HTML report
+and output a notification.
+
+\subsection*{What are the main challenges for distributed deadlock
+  detection?}
+\label{sec:member32}
+
+A common mechanism to detect deadlock in MPI program is to use a graph-based
+deadlock detection mechanism.
+%
+This approach requires in input precise information about the current MPI
+state such as MPI calls from call the running processes, and point-to-point
+and collective matching situation.
+%
+In order to obtain this information, we need a mechanism to intercept the MPI
+calls and analyze their semantic in a wait-state analysis.
+%
+In a centralized system, the program can be run in a single machine, so it is
+easier to intercept the MPI calls and run wait-state analysis to gather all
+the information for each process to perform graph-based deadlock detection.
+%
+Since all the processes are running within the same system, sharing the
+information collected to build the graph and run the deadlock analysis is
+straightforward.
+%
+Unfortunately this is not true if we want to distribute the wait-state
+mechanism across multiple processes to increase performance, so there is a
+price to be paid for obtaining a scalable deadlock detection.
+%
+Indeed, running the MPI program in a cluster and execute wait-state analysis
+would require to send all the gathered information to a central point that
+later will perform the graph deadlock analysis.
+%
+The authors in the papers did a good job in distributing the wait-state
+mechanism by introducing the transition system, which allows to execute the
+program normally while the transition system, through additional processes in
+the background, gather the information about the point-to-point and collective
+matches and collect them in a single point (root node).
+
+\subsection*{Can you suggest an alternative distributed algorithm for
+  deadlock detection or an improvement over the proposed algorithm?}
+\label{sec:member33}
+
+The distributed mechanism proposed in the paper still have a centralized
+phase which is the graph-based deadlock detection.
+%
+This phase, as we can see from the experimental results might introduce
+additional overhead when a deadlock is detected by the distributed transition
+system.
+%
+In particular the most of the overhead is generated by the output generation.
+%
+A possible improvement to the algorithm would be to parallelize the graph
+generation while the matching information (that forms an arc) arrives to the
+root node of the transition system.
+%
+This approach would definitely further reduce the total overhead of the
+proposed distribute deadlock detection algorithm.
+
+\subsection*{What is the overhead of the proposed method?
+  %
+  Will this vary depending on
+  the kind of application?
+  %
+  Which applications are affected most?}
+\label{sec:member34}
+
+The experiments on the distributed deadlock detection tool MUST have been
+conducted on two different benchmarks: a \emph{synthetic benchmark}, and on
+SPEC MPI2007 a benchmark suite based on real-world applications.
+%
+In particular the synthetic benchmark contains two separate test cases, one
+with no deadlocks  and another one with deadlocks, to measure the overheads of
+all the system's components.
+
+The deadlock-free test case shows that the tool introduces a significant
+slowdown especially for higher input loads (i.e. 8 fan-in).
+%
+However, it shows a weak scaling.
+%
+Indeed, increasing the number of processors up to 4096 the slowdown remains
+constant (Figure~9 in the paper), differently from the centralized
+implementation where experiments show a slowdown of 8000 with 4096
+processes.
+
+The tests on the deadlock case study measure the performance of the tool when
+it applies the graph-based deadlock detection (Figure~10a in the paper).
+%
+The results show an increment of the runtime overhead while increasing the
+number of processes, nevertheless, the centralized graph detection is still
+applicable even at large scale (runtime $<100s$).
+%
+In particular, the Figure~10b presents the time ratios of each activity
+performed by the detection process: \emph{synchronization}, \emph{WFG gather},
+\emph{graph build}, \emph{deadlock check}, and \emph{output generation}.
+%
+The most of the overhead ($~75\%$) is introduced by the \emph{output
+  generation}, which consists in the DOT graph creation for visualization
+purposes.
+
+The experimental results on the SPEC MPI2007 benchmark suite has been
+increasing the number of processes up to 2048, and show an average runtime
+increase of $34\%$.
+%
+As illustrated in Figure~12, the slowdown is low for most of the
+applications, except for the programs \emph{121.pop2} and \emph{143.dleslie}
+where the larger overhead is due to a high communication ratios.
+%
+This suggests that the higher overhead depends on the type of applications,
+and in particular it is influenced by an heavy messages exchange.
+%
+The network performance may have a role on this problem, becoming a bottleneck
+in the processes communication.
+%
+The application \emph{126.lammps} instead shows a larger overhead because of a
+potential deadlock detected by the tool that applies the graph-based detection
+mechanism increasing the runtime.
+
+\printbibliography
+
+\end{refsection}
+
+%%% Local Variables:
+%%% mode: latex
+%%% eval: (flyspell-mode 1)
+%%% TeX-master: "root.tex"
+%%% End:
